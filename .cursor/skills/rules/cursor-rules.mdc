@@ -1,0 +1,229 @@
+---
+alwaysApply: true
+name: nextjs-production-rules
+description: Strict rules for building production-ready Next.js applications as a senior specialist
+---
+
+# Overview
+
+This rule defines **strict, non-negotiable standards** for building a **production-grade Next.js application**.  
+It enforces best practices used by senior/staff engineers, covering architecture, security, performance, SEO, accessibility, and deployment readiness.
+
+The agent must follow these rules **exactly**.  
+If there is any conflict, the priority order is:
+
+**Security > Correctness > Performance > Maintainability > Developer Experience**
+
+---
+
+## Absolute Rules (Non-Negotiable)
+
+- Do NOT invent APIs, endpoints, packages, environment variables, file paths, or product requirements.
+- If something is unknown, create a **minimal safe stub** and clearly mark it with `TODO:` — never pretend it works.
+- Do NOT ship placeholder or fake data as final output.
+- Prefer simple, explicit, boring solutions over clever abstractions.
+- Never bypass these rules unless explicitly instructed by the user.
+
+---
+
+## Tech Stack Requirements
+
+- Use **Next.js App Router** (`app/`). Do not use Pages Router unless explicitly requested.
+- Use **TypeScript everywhere**.
+  - Avoid `any`.
+  - If unavoidable, isolate it and justify with a comment.
+- Default to **React Server Components**.
+  - Use `"use client"` only when strictly required.
+- Choose **one styling approach** and stay consistent:
+  - Preferred: Tailwind CSS
+  - Acceptable: CSS Modules
+- Ensure ESLint and Prettier are respected at all times.
+
+---
+
+## Project Structure (Strict)
+
+Use a clean, predictable structure:
+
+- `app/` → routes, layouts, server components, route handlers
+- `components/` → reusable UI components only
+- `features/` → domain-specific modules (recommended)
+- `lib/` → utilities (separate server-only vs shared)
+- `services/` → external integrations and SDK wrappers
+- `types/` → shared TypeScript types
+- `public/` → static assets
+- `tests/` → tests (if included)
+
+Rules:
+- Do NOT create deep nesting without strong justification.
+- Do NOT mix route/business logic into generic UI components.
+- Server-only logic must never leak into client bundles.
+
+---
+
+## Server vs Client Boundaries
+
+- Server Components are the default.
+- Use `"use client"` only for:
+  - event handlers
+  - state, effects
+  - browser-only APIs
+  - client-only libraries
+- Never access secrets in client code.
+- For server-only modules, explicitly include:
+  - `import "server-only";`
+- Avoid calling internal API routes from server code; prefer direct function calls.
+
+---
+
+## Data Fetching & Caching
+
+- Prefer data fetching in Server Components.
+- Use proper caching strategies:
+  - Cache by default when safe.
+  - Use `cache: "no-store"` only for truly dynamic data.
+  - Use `next: { revalidate: <seconds> }` for ISR behavior.
+- Avoid over-fetching; fetch once per route when possible.
+
+---
+
+## Validation & Type Safety
+
+- Validate **all external inputs**:
+  - route params
+  - search params
+  - request bodies
+  - headers
+- Use **zod** (preferred) for:
+  - request validation
+  - environment variables
+  - server-side form validation
+- Client-side validation is optional.
+- Server-side validation is mandatory.
+
+---
+
+## Environment Variables (Production)
+
+- Centralize env handling in a single file (e.g. `env.ts`).
+- Validate env variables at startup.
+- `NEXT_PUBLIC_*` is ONLY for non-sensitive values.
+- Secrets must never be exposed to the client.
+- Never log secrets.
+
+---
+
+## Security Requirements
+
+- Sanitize and validate all user input.
+- Avoid `dangerouslySetInnerHTML`.
+  - If unavoidable, sanitize and document why.
+- Never rely on client-only authorization checks.
+- Prevent leaking stack traces or internal errors to users.
+- Apply secure headers where applicable.
+
+---
+
+## SEO & Metadata
+
+- Use `generateMetadata()` when needed.
+- Always define:
+  - title
+  - description
+  - canonical URL (when applicable)
+  - OpenGraph and Twitter metadata for public pages
+- Use semantic HTML and correct heading hierarchy.
+
+---
+
+## Performance Rules
+
+- Use `next/image` for content images.
+- Use `next/font` for fonts.
+- Minimize client bundle size:
+  - keep heavy logic on the server
+  - avoid unnecessary dependencies
+- Use dynamic imports only when they clearly reduce bundle size.
+
+---
+
+## Accessibility (A11y)
+
+- All interactive elements must be keyboard-accessible.
+- All inputs must have labels.
+- Use ARIA only when necessary and correctly.
+- Focus states must be visible.
+
+---
+
+## Error Handling
+
+- Use `error.tsx` and `not-found.tsx` when appropriate.
+- Handle failures gracefully:
+  - user-friendly UI
+  - actionable server-side logs
+- Do not silently swallow errors.
+
+---
+
+## Forms & Mutations
+
+- Prefer **Server Actions** for mutations.
+- Always:
+  - validate input server-side
+  - return typed success/error results
+  - show field-level errors
+  - prevent double submit
+  - handle loading states
+
+---
+
+## Code Quality Standards
+
+- No duplicated logic.
+- Extract shared utilities.
+- Avoid magic strings; centralize constants.
+- Keep functions small and readable.
+- Comments should explain **why**, not **what**.
+
+---
+
+## Build & Production Readiness
+
+Before considering work complete:
+- `npm run lint` must pass
+- `npm run typecheck` or `tsc --noEmit` must pass
+- `npm run build` must pass with no errors
+- Remove or gate all `console.log` from production code
+
+---
+
+## README Requirements
+
+Provide a `README.md` with:
+- setup instructions
+- environment variables list with examples
+- available scripts (dev, build, start, lint, typecheck)
+- deployment notes (Vercel recommended)
+- brief architecture overview
+
+---
+
+## Forbidden Actions
+
+- Do NOT expose secrets in client code or `NEXT_PUBLIC_*`.
+- Do NOT add libraries without clear justification.
+- Do NOT mark everything as `"use client"`.
+- Do NOT bypass type safety with broad `any`.
+- Do NOT call server → internal API routes unnecessarily.
+- Do NOT ship without a passing build.
+
+---
+
+## Expected Output Behavior
+
+When completing a task, always provide:
+- a short summary of changes
+- any new environment variables added
+- how to run lint/typecheck/build
+- remaining TODOs (if any)
