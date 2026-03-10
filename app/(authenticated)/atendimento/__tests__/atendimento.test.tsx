@@ -24,11 +24,12 @@ describe('Atendimento Components', () => {
         timestamp: '2026-01-21T10:00:00Z',
         from_me: true,
       };
+      const expectedTime = mockFormatTime(message.timestamp);
 
       render(<MessageBubble message={message} formatTime={mockFormatTime} />);
 
       expect(screen.getByText('Olá, como posso ajudar?')).toBeInTheDocument();
-      expect(screen.getByText(/10:00/)).toBeInTheDocument();
+      expect(screen.getByText(expectedTime)).toBeInTheDocument();
     });
 
     it('renders received message correctly', () => {
@@ -40,11 +41,12 @@ describe('Atendimento Components', () => {
         from_me: false,
         push_name: 'João Silva',
       };
+      const expectedTime = mockFormatTime(message.timestamp);
 
       render(<MessageBubble message={message} formatTime={mockFormatTime} />);
 
       expect(screen.getByText('Olá, doutor!')).toBeInTheDocument();
-      expect(screen.getByText(/10:01/)).toBeInTheDocument();
+      expect(screen.getByText(expectedTime)).toBeInTheDocument();
     });
 
     it('shows double check for sent messages', () => {

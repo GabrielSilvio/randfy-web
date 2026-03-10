@@ -1,13 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { PatientData } from '@/lib/api';
+import { PatientData, PatientResponse } from '@/lib/api';
 
 interface PatientModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (data: PatientData) => Promise<void>;
   isLoading?: boolean;
+  /** When provided, modal is in edit mode with form pre-filled */
+  patient?: PatientResponse | null;
 }
 
 const INITIAL_FORM: PatientData = {
@@ -34,16 +36,39 @@ function formatCPF(value: string): string {
   return `${numbers.slice(0, 3)}.${numbers.slice(3, 6)}.${numbers.slice(6, 9)}-${numbers.slice(9, 11)}`;
 }
 
-export function PatientModal({ isOpen, onClose, onSave, isLoading = false }: PatientModalProps) {
+function parseDobForInput(dob?: string): string {
+  if (!dob) return '';
+  const d = new Date(dob);
+  return d.toISOString().slice(0, 10);
+}
+
+export function PatientModal({ isOpen, onClose, onSave, isLoading = false, patient }: PatientModalProps) {
   const [form, setForm] = useState<PatientData>(INITIAL_FORM);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (isOpen) {
-      setForm(INITIAL_FORM);
+      if (patient) {
+        const phoneDisplay = patient.phone_number.replace(/^\+55/, '').replace(/\D/g, '');
+        const phoneFormatted =
+          phoneDisplay.length <= 2
+            ? phoneDisplay
+            : phoneDisplay.length <= 7
+              ? `(${phoneDisplay.slice(0, 2)}) ${phoneDisplay.slice(2)}`
+              : `(${phoneDisplay.slice(0, 2)}) ${phoneDisplay.slice(2, 7)}-${phoneDisplay.slice(7, 11)}`;
+        setForm({
+          name: patient.name,
+          phone_number: phoneFormatted,
+          dob: parseDobForInput(patient.dob),
+          cpf: patient.cpf || '',
+          sex: patient.sex,
+        });
+      } else {
+        setForm(INITIAL_FORM);
+      }
       setErrors({});
     }
-  }, [isOpen]);
+  }, [isOpen, patient]);
 
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
@@ -130,11 +155,13 @@ export function PatientModal({ isOpen, onClose, onSave, isLoading = false }: Pat
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="size-10 bg-white/20 rounded-lg flex items-center justify-center">
-                <span className="material-symbols-outlined">person_add</span>
+                <span className="material-symbols-outlined">{patient ? 'person' : 'person_add'}</span>
               </div>
               <div>
-                <h2 className="text-xl font-bold">Novo Paciente</h2>
-                <p className="text-sm text-white/80">Cadastre um novo paciente</p>
+                <h2 className="text-xl font-bold">{patient ? 'Editar Paciente' : 'Novo Paciente'}</h2>
+                <p className="text-sm text-white/80">
+                  {patient ? 'Atualize os dados do paciente' : 'Cadastre um novo paciente'}
+                </p>
               </div>
             </div>
             <button
@@ -274,7 +301,7 @@ export function PatientModal({ isOpen, onClose, onSave, isLoading = false }: Pat
               ) : (
                 <>
                   <span className="material-symbols-outlined text-[18px]">check</span>
-                  Cadastrar Paciente
+                  {patient ? 'Salvar Alterações' : 'Cadastrar Paciente'}
                 </>
               )}
             </button>

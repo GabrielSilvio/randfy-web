@@ -177,7 +177,8 @@ export default function OnboardingPage() {
     setQrLoading(true);
     try {
       const qrResponse = await apiClient.getQRCode(currentTenantId);
-      setQrCode(qrResponse.base64 || qrResponse.qrcode);
+      // Usar base64 diretamente da resposta
+      setQrCode(qrResponse.base64);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Erro ao carregar QR Code.';
       setError(message);

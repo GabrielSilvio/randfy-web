@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { apiClient, AppointmentResponse, CurrentUserResponse, PatientResponse, AppointmentData } from '@/lib/api';
+import { apiClient, AppointmentResponse, CurrentUserResponse, PatientResponse, AppointmentData, ServiceResponse, UserResponse } from '@/lib/api';
 import { AppointmentModal } from '@/components/agenda/appointment-modal';
 
 type ViewMode = 'day' | 'week' | 'month';
@@ -25,13 +25,17 @@ export default function AgendaPage() {
   const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false);
   const [isSavingAppointment, setIsSavingAppointment] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [services, setServices] = useState<ServiceResponse[]>([]);
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [selectedAppointment, setSelectedAppointment] = useState<AppointmentResponse | null>(null);
+  const [cancellingId, setCancellingId] = useState<number | null>(null);
 
-  // Mock doctors - replace with actual data from API
-  const [doctors, setDoctors] = useState<Doctor[]>([
-    { id: 1, name: 'Dr. Gabriel Oliveira', initials: 'GO', color: 'bg-blue-500', selected: true },
-    { id: 2, name: 'Dra. Maria Lucia', initials: 'ML', color: 'bg-green-500', selected: true },
-    { id: 3, name: 'Dr. Ricardo Faria', initials: 'RF', color: 'bg-purple-500', selected: false },
-  ]);
+  const DOCTOR_COLORS = ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-amber-500', 'bg-rose-500', 'bg-cyan-500'];
+  const getInitials = (name: string) => {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    return name.slice(0, 2).toUpperCase();
+  };
 
   // Update current time every minute for the time indicator
   useEffect(() => {
@@ -63,8 +67,24 @@ export default function AgendaPage() {
         const tenantId = user.user?.tenant_id;
         if (!tenantId) return;
 
-        const patientsResponse = await apiClient.getPatients(tenantId);
+        const [patientsResponse, usersResponse, servicesResponse] = await Promise.all([
+          apiClient.getPatients(tenantId),
+          apiClient.listUsers(tenantId),
+          apiClient.getServices(tenantId),
+        ]);
         setPatients(patientsResponse.data || []);
+        setServices(servicesResponse.data || []);
+
+        const userList = usersResponse.data || [];
+        setDoctors(
+          userList.map((u: UserResponse, index: number) => ({
+            id: u.id,
+            name: u.name,
+            initials: getInitials(u.name),
+            color: DOCTOR_COLORS[index % DOCTOR_COLORS.length],
+            selected: true,
+          }))
+        );
 
         const { startDate, endDate } = getDateRange(selectedDate, viewMode);
         await loadAppointments(tenantId, startDate, endDate);
@@ -112,13 +132,31 @@ export default function AgendaPage() {
     try {
       await apiClient.createAppointment(tenantId, data);
       setIsAppointmentModalOpen(false);
-      
+
       const { startDate, endDate } = getDateRange(selectedDate, viewMode);
       await loadAppointments(tenantId, startDate, endDate);
     } catch (error) {
       console.error('Error creating appointment:', error);
     } finally {
       setIsSavingAppointment(false);
+    }
+  };
+
+  const handleCancelAppointment = async (appointmentId: number) => {
+    const tenantId = userData?.user?.tenant_id;
+    if (!tenantId) return;
+    if (typeof window !== 'undefined' && !window.confirm('Cancelar este agendamento?')) return;
+
+    setCancellingId(appointmentId);
+    try {
+      await apiClient.cancelAppointment(tenantId, appointmentId);
+      setSelectedAppointment(null);
+      const { startDate, endDate } = getDateRange(selectedDate, viewMode);
+      await loadAppointments(tenantId, startDate, endDate);
+    } catch (error) {
+      console.error('Error cancelling appointment:', error);
+    } finally {
+      setCancellingId(null);
     }
   };
 
@@ -271,8 +309,13 @@ export default function AgendaPage() {
   };
 
   const weekDays = getWeekDays();
-  const confirmedCount = appointments.filter(a => a.status === 'CONFIRMED').length;
-  const pendingCount = appointments.filter(a => a.status === 'PENDING').length;
+  const selectedDoctorIds = doctors.filter((d) => d.selected).map((d) => d.id);
+  const filteredAppointments =
+    selectedDoctorIds.length === 0
+      ? appointments
+      : appointments.filter((a) => selectedDoctorIds.includes(a.professional_id));
+  const confirmedCount = filteredAppointments.filter((a) => a.status === 'CONFIRMED').length;
+  const pendingCount = filteredAppointments.filter((a) => a.status === 'PENDING').length;
   const currentTimeTop = getCurrentTimePosition();
 
   return (
@@ -479,7 +522,7 @@ export default function AgendaPage() {
                       ))}
 
                       {/* Appointments */}
-                      {appointments
+                      {filteredAppointments
                         .filter(apt => isAppointmentInDay(apt, selectedDate))
                         .map((appointment) => {
                           const { top, height } = getAppointmentPosition(
@@ -492,6 +535,10 @@ export default function AgendaPage() {
                           return (
                             <div
                               key={appointment.id}
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => setSelectedAppointment(appointment)}
+                              onKeyDown={(e) => e.key === 'Enter' && setSelectedAppointment(appointment)}
                               className={`absolute left-2 right-2 rounded-lg border-2 p-3 text-sm overflow-hidden cursor-pointer hover:shadow-md transition-shadow ${statusColor}`}
                               style={{ top: `${top}px`, height: `${height}px` }}
                             >
@@ -573,7 +620,7 @@ export default function AgendaPage() {
                         ))}
 
                         {/* Appointments */}
-                        {appointments
+                        {filteredAppointments
                           .filter(apt => isAppointmentInDay(apt, day))
                           .map((appointment) => {
                             const { top, height } = getAppointmentPosition(
@@ -586,6 +633,10 @@ export default function AgendaPage() {
                             return (
                               <div
                                 key={appointment.id}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => setSelectedAppointment(appointment)}
+                                onKeyDown={(e) => e.key === 'Enter' && setSelectedAppointment(appointment)}
                                 className={`absolute left-1 right-1 rounded-lg border-2 p-2 text-xs overflow-hidden cursor-pointer hover:shadow-md transition-shadow ${statusColor}`}
                                 style={{ top: `${top}px`, height: `${height}px` }}
                               >
@@ -660,7 +711,7 @@ export default function AgendaPage() {
                       for (let day = 1; day <= daysInMonth; day++) {
                         const date = new Date(year, month, day);
                         const isToday = date.toDateString() === new Date().toDateString();
-                        const dayAppointments = appointments.filter(apt => isAppointmentInDay(apt, date));
+                        const dayAppointments = filteredAppointments.filter(apt => isAppointmentInDay(apt, date));
 
                         cells.push(
                           <div
@@ -727,7 +778,7 @@ export default function AgendaPage() {
               <span className="material-symbols-outlined text-primary text-[20px]">event</span>
               <div>
                 <span className="text-xs text-slate-500 uppercase">Total</span>
-                <p className="text-lg font-bold text-slate-900">{appointments.length} Agendamentos</p>
+                <p className="text-lg font-bold text-slate-900">{filteredAppointments.length} Agendamentos</p>
               </div>
             </div>
             
@@ -757,7 +808,47 @@ export default function AgendaPage() {
         onSave={handleSaveAppointment}
         isLoading={isSavingAppointment}
         patients={patients}
+        services={services}
+        professionals={doctors}
       />
+
+      {/* Appointment detail / cancel popover */}
+      {selectedAppointment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setSelectedAppointment(null)} />
+          <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-sm mx-4">
+            <h3 className="text-lg font-semibold text-slate-900 mb-3">Agendamento</h3>
+            <p className="text-sm text-slate-600 font-medium">{selectedAppointment.patient_name}</p>
+            <p className="text-sm text-slate-500">{selectedAppointment.service_name}</p>
+            <p className="text-sm text-slate-500">
+              {new Date(selectedAppointment.date_time).toLocaleString('pt-BR', {
+                dateStyle: 'short',
+                timeStyle: 'short',
+              })}
+            </p>
+            <p className="text-sm text-slate-500">{selectedAppointment.professional_name}</p>
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedAppointment(null)}
+                className="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50"
+              >
+                Fechar
+              </button>
+              {selectedAppointment.status !== 'CANCELLED' && (
+                <button
+                  type="button"
+                  onClick={() => handleCancelAppointment(selectedAppointment.id)}
+                  disabled={cancellingId === selectedAppointment.id}
+                  className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                >
+                  {cancellingId === selectedAppointment.id ? 'Cancelando...' : 'Cancelar agendamento'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

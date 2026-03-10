@@ -1,21 +1,60 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { apiClient, ChatConversation, ChatMessage, CurrentUserResponse } from '@/lib/api';
+import { useSSE } from '@/lib/hooks/useSSE';
 
 export default function AtendimentoPage() {
+  const searchParams = useSearchParams();
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<ChatConversation | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [userData, setUserData] = useState<CurrentUserResponse | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const selectedConversationRef = useRef<ChatConversation | null>(null);
+  selectedConversationRef.current = selectedConversation;
+
+  const tenantId = userData?.user?.tenant_id ?? null;
+  const { isConnected } = useSSE({
+    tenantId,
+    enabled: !!tenantId,
+    onMessage: (data) => {
+      const phone = data.phone_number ?? data.from ?? '';
+      const newMsg: ChatMessage = {
+        id: data.message_id ?? '',
+        from: data.from ?? phone,
+        text: data.text ?? '',
+        timestamp: data.timestamp ?? new Date().toISOString(),
+        from_me: false,
+      };
+      const currentSelected = selectedConversationRef.current;
+      if (currentSelected?.phone_number === phone) {
+        setMessages((prev) => [...prev, newMsg]);
+      }
+      setConversations((prev) => {
+        const updated = prev.map((conv) => {
+          if (conv.phone_number === phone) {
+            return {
+              ...conv,
+              last_message: newMsg.text,
+              last_message_time: newMsg.timestamp,
+              unread_count: currentSelected?.phone_number === phone ? conv.unread_count : conv.unread_count + 1,
+            };
+          }
+          return conv;
+        });
+        return updated.sort(
+          (a, b) => new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime()
+        );
+      });
+    },
+  });
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -38,9 +77,8 @@ export default function AtendimentoPage() {
         try {
           const conversationsResponse = await apiClient.getConversations(tenantId);
           setConversations(conversationsResponse.conversations || []);
-          setIsConnected(true);
         } catch {
-          setIsConnected(false);
+          // Conversations failed; isConnected from useSSE reflects stream state
         }
       } catch (error) {
         console.error('Error loading conversations:', error);
@@ -76,83 +114,15 @@ export default function AtendimentoPage() {
     loadMessages();
   }, [selectedConversation, userData]);
 
-  // WebSocket connection for real-time updates
+  // Auto-select conversation when opening with ?phone=...
   useEffect(() => {
-    if (!userData?.user?.tenant_id || !isConnected) return;
-
-    // Simple WebSocket connection for real-time message updates
-    // Note: This assumes your backend supports WebSocket connections
-    // Adjust the URL and protocol as needed for your backend
-    const connectWebSocket = () => {
-      try {
-        const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8080/ws/chat';
-        const ws = new WebSocket(`${wsUrl}?tenant_id=${userData.user!.tenant_id}`);
-        
-        ws.onopen = () => {
-          console.log('WebSocket connected');
-        };
-
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            
-            // Handle new message
-            if (data.type === 'new_message' && data.message) {
-              const newMsg = data.message as ChatMessage;
-              
-              // Update messages if this is the active conversation
-              if (selectedConversation?.phone_number === newMsg.from || 
-                  selectedConversation?.phone_number === data.phone_number) {
-                setMessages(prev => [...prev, newMsg]);
-              }
-
-              // Update conversation list
-              setConversations(prev => {
-                const updated = prev.map(conv => {
-                  if (conv.phone_number === (newMsg.from_me ? data.phone_number : newMsg.from)) {
-                    return {
-                      ...conv,
-                      last_message: newMsg.text,
-                      last_message_time: newMsg.timestamp,
-                      unread_count: newMsg.from_me ? conv.unread_count : conv.unread_count + 1,
-                    };
-                  }
-                  return conv;
-                });
-                // Sort by last message time
-                return updated.sort((a, b) => 
-                  new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime()
-                );
-              });
-            }
-          } catch (error) {
-            console.error('Error parsing WebSocket message:', error);
-          }
-        };
-
-        ws.onerror = (error) => {
-          console.error('WebSocket error:', error);
-        };
-
-        ws.onclose = () => {
-          console.log('WebSocket disconnected, reconnecting in 5s...');
-          setTimeout(connectWebSocket, 5000);
-        };
-
-        wsRef.current = ws;
-      } catch (error) {
-        console.error('Error connecting WebSocket:', error);
-      }
-    };
-
-    connectWebSocket();
-
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
-  }, [userData, isConnected, selectedConversation]);
+    const phone = searchParams.get('phone');
+    if (!phone || conversations.length === 0) return;
+    const match = conversations.find((c) => c.phone_number === phone || c.phone_number === phone.replace(/\D/g, ''));
+    if (match && match.id !== selectedConversation?.id) {
+      setSelectedConversation(match);
+    }
+  }, [searchParams, conversations]);
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !selectedConversation || !userData?.user?.tenant_id) return;

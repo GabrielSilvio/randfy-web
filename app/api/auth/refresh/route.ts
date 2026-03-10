@@ -19,7 +19,7 @@ export async function POST() {
     }
 
     // Chamar backend para refresh
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL;
     const response = await fetch(`${backendUrl}/api/auth/refresh`, {
       method: 'POST',
       headers: {

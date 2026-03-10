@@ -10,9 +10,11 @@ export default function PacientesPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [userData, setUserData] = useState<CurrentUserResponse | null>(null);
   const [isPatientModalOpen, setIsPatientModalOpen] = useState(false);
+  const [editingPatient, setEditingPatient] = useState<PatientResponse | null>(null);
   const [isSavingPatient, setIsSavingPatient] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [deletingPatientId, setDeletingPatientId] = useState<number | null>(null);
 
   const loadPatients = async (tenantId: number) => {
     try {
@@ -51,22 +53,57 @@ export default function PacientesPage() {
     setErrorMessage(null);
 
     try {
-      const newPatient = await apiClient.createPatient(tenantId, data);
-      setIsPatientModalOpen(false);
-      setSuccessMessage(`Paciente "${newPatient.name}" cadastrado com sucesso!`);
-      
-      // Reload patients list
+      if (editingPatient) {
+        await apiClient.updatePatient(tenantId, editingPatient.id, data);
+        setIsPatientModalOpen(false);
+        setEditingPatient(null);
+        setSuccessMessage(`Paciente "${data.name}" atualizado com sucesso!`);
+      } else {
+        const newPatient = await apiClient.createPatient(tenantId, data);
+        setIsPatientModalOpen(false);
+        setSuccessMessage(`Paciente "${newPatient.name}" cadastrado com sucesso!`);
+      }
+
       await loadPatients(tenantId);
-      
-      // Hide success message after 4 seconds
       setTimeout(() => setSuccessMessage(null), 4000);
     } catch (error) {
-      console.error('Error creating patient:', error);
-      const errorMsg = error instanceof Error ? error.message : 'Erro ao cadastrar paciente';
+      console.error(editingPatient ? 'Error updating patient:' : 'Error creating patient:', error);
+      const errorMsg =
+        error instanceof Error
+          ? error.message
+          : editingPatient
+            ? 'Erro ao atualizar paciente'
+            : 'Erro ao cadastrar paciente';
       setErrorMessage(errorMsg);
       setTimeout(() => setErrorMessage(null), 5000);
     } finally {
       setIsSavingPatient(false);
+    }
+  };
+
+  const handleEditPatient = (patient: PatientResponse) => {
+    setEditingPatient(patient);
+    setIsPatientModalOpen(true);
+  };
+
+  const handleDeletePatient = async (patient: PatientResponse) => {
+    const tenantId = userData?.user?.tenant_id;
+    if (!tenantId) return;
+    if (typeof window !== 'undefined' && !window.confirm(`Excluir o paciente "${patient.name}"? Esta ação não pode ser desfeita.`)) return;
+
+    setDeletingPatientId(patient.id);
+    setErrorMessage(null);
+    try {
+      await apiClient.deletePatient(tenantId, patient.id);
+      setSuccessMessage('Paciente excluído com sucesso!');
+      setTimeout(() => setSuccessMessage(null), 4000);
+      await loadPatients(tenantId);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Erro ao excluir paciente';
+      setErrorMessage(errorMsg);
+      setTimeout(() => setErrorMessage(null), 5000);
+    } finally {
+      setDeletingPatientId(null);
     }
   };
 
@@ -206,7 +243,8 @@ export default function PacientesPage() {
                 <div className="col-span-2">Telefone</div>
                 <div className="col-span-2">Idade</div>
                 <div className="col-span-2">Sexo</div>
-                <div className="col-span-2 text-right">Cadastro</div>
+                <div className="col-span-1 text-right">Cadastro</div>
+                <div className="col-span-1 text-right">Ações</div>
               </div>
 
               {/* Table Body */}
@@ -255,10 +293,33 @@ export default function PacientesPage() {
                     </div>
 
                     {/* Created At */}
-                    <div className="col-span-2 flex items-center justify-end">
+                    <div className="col-span-1 flex items-center justify-end">
                       <span className="text-sm text-slate-500">
                         {new Date(patient.created_at).toLocaleDateString('pt-BR')}
                       </span>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="col-span-1 flex items-center justify-end gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleEditPatient(patient)}
+                        className="p-2 text-primary hover:bg-primary/5 rounded-lg transition-colors"
+                        title="Editar"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">edit</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePatient(patient)}
+                        disabled={deletingPatientId === patient.id}
+                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                        title="Excluir"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">
+                          {deletingPatientId === patient.id ? 'hourglass_empty' : 'delete'}
+                        </span>
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -279,9 +340,13 @@ export default function PacientesPage() {
       {/* Patient Modal */}
       <PatientModal
         isOpen={isPatientModalOpen}
-        onClose={() => setIsPatientModalOpen(false)}
+        onClose={() => {
+          setIsPatientModalOpen(false);
+          setEditingPatient(null);
+        }}
         onSave={handleSavePatient}
         isLoading={isSavingPatient}
+        patient={editingPatient}
       />
     </div>
   );

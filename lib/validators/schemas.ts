@@ -159,6 +159,82 @@ export const createServiceSchema = z.object({
 export type CreateServiceData = z.infer<typeof createServiceSchema>;
 
 /**
+ * Schema for updating a service (partial)
+ */
+export const updateServiceSchema = createServiceSchema.partial();
+
+export type UpdateServiceData = z.infer<typeof updateServiceSchema>;
+
+// ==================== PATIENT EDIT SCHEMA ====================
+
+/**
+ * Schema for editing a patient (all fields optional)
+ */
+export const patientEditSchema = z.object({
+  name: nameSchema.optional(),
+  phone_number: phoneSchema,
+  dob: z.string().optional().or(z.literal('')),
+  cpf: z.string().max(14, 'CPF inválido').optional().or(z.literal('')),
+  sex: z.enum(['M', 'F']).optional(),
+});
+
+export type PatientEditData = z.infer<typeof patientEditSchema>;
+
+// ==================== VITAL SIGN SCHEMA ====================
+
+/**
+ * Schema for creating a vital sign
+ */
+export const createVitalSignSchema = z.object({
+  value: z.string().min(1, 'Valor é obrigatório'),
+  vital_sign_type_id: z.number().min(1, 'Selecione um tipo de sinal vital'),
+});
+
+export type CreateVitalSignData = z.infer<typeof createVitalSignSchema>;
+
+// ==================== TEST REQUEST SCHEMA ====================
+
+/**
+ * Schema for creating a test request
+ */
+export const createTestRequestSchema = z.object({
+  test: z.string().min(2, 'Nome do exame deve ter no mínimo 2 caracteres').max(500, 'Nome muito longo'),
+});
+
+export type CreateTestRequestData = z.infer<typeof createTestRequestSchema>;
+
+// ==================== PRESCRIPTION SCHEMAS ====================
+
+/**
+ * Schema for updating a prescription (partial)
+ */
+export const updatePrescriptionSchema = z.object({
+  medication_name: z.string().max(200).optional(),
+  detail: z.string().max(1000).optional(),
+  duration_days: z.number().min(1).max(365).optional(),
+});
+
+export type UpdatePrescriptionData = z.infer<typeof updatePrescriptionSchema>;
+
+// ==================== TIME OFF SCHEMA ====================
+
+/**
+ * Schema for creating time off
+ */
+export const createTimeOffSchema = z.object({
+  start_date_time: z.string().min(1, 'Data/hora de início é obrigatória'),
+  end_date_time: z.string().min(1, 'Data/hora de fim é obrigatória'),
+  reason: z.string().max(500).optional().or(z.literal('')),
+}).refine(
+  (data) => new Date(data.end_date_time) > new Date(data.start_date_time),
+  { message: 'Data de fim deve ser após a data de início', path: ['end_date_time'] }
+);
+
+export type CreateTimeOffData = z.infer<typeof createTimeOffSchema>;
+
+// ==================== HELPERS ====================
+
+/**
  * Helper to validate data and return formatted errors
  */
 export function validateData<T>(

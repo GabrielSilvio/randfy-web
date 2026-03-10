@@ -2,13 +2,23 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { apiClient, ChatConversation, CurrentUserResponse } from '@/lib/api';
 
+function isToday(isoString: string): boolean {
+  const d = new Date(isoString);
+  const today = new Date();
+  return d.getDate() === today.getDate() && d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
+}
+
 export default function AtendimentoIAPage() {
+  const router = useRouter();
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [userData, setUserData] = useState<CurrentUserResponse | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [messagesToday, setMessagesToday] = useState<number>(0);
+  const [appointmentsToday, setAppointmentsToday] = useState<number>(0);
 
   useEffect(() => {
     const loadData = async () => {
@@ -20,9 +30,21 @@ export default function AtendimentoIAPage() {
         if (!tenantId) return;
 
         try {
-          const conversationsResponse = await apiClient.getConversations(tenantId);
-          setConversations(conversationsResponse.conversations || []);
+          const [conversationsResponse, appointmentsResponse] = await Promise.all([
+            apiClient.getConversations(tenantId),
+            apiClient.getAppointments(tenantId, (() => {
+              const t = new Date();
+              const start = new Date(t.getFullYear(), t.getMonth(), t.getDate(), 0, 0, 0, 0);
+              const end = new Date(t.getFullYear(), t.getMonth(), t.getDate(), 23, 59, 59, 999);
+              return { start_date: start.toISOString(), end_date: end.toISOString() };
+            })(),
+          ]);
+          const convs = conversationsResponse.conversations || [];
+          setConversations(convs);
           setIsConnected(true);
+          const todayCount = convs.filter((c) => c.last_message_time && isToday(c.last_message_time)).length;
+          setMessagesToday(todayCount);
+          setAppointmentsToday((appointmentsResponse.data || []).length);
         } catch {
           setIsConnected(false);
         }
@@ -134,6 +156,10 @@ export default function AtendimentoIAPage() {
                   {conversations.map((conversation) => (
                     <div
                       key={conversation.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => router.push(`/atendimento?phone=${encodeURIComponent(conversation.phone_number)}`)}
+                      onKeyDown={(e) => e.key === 'Enter' && router.push(`/atendimento?phone=${encodeURIComponent(conversation.phone_number)}`)}
                       className="p-4 hover:bg-slate-50 transition-colors cursor-pointer flex items-center gap-4"
                     >
                       <div className="bg-primary/10 rounded-full size-12 flex items-center justify-center text-primary font-bold">
@@ -179,11 +205,11 @@ export default function AtendimentoIAPage() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <p className="text-2xl font-bold">-</p>
+                  <p className="text-2xl font-bold">{messagesToday}</p>
                   <p className="text-sm text-white/70">Mensagens hoje</p>
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">-</p>
+                  <p className="text-2xl font-bold">{appointmentsToday}</p>
                   <p className="text-sm text-white/70">Agendamentos</p>
                 </div>
               </div>

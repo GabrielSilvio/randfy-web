@@ -15,6 +15,10 @@ import {
   ServiceData,
   UpdateUserData,
   CreateTenantData,
+  UpdateServiceData,
+  UserScheduleData,
+  TimeOffResponse,
+  TimeOffData,
 } from '@/lib/api';
 import { ScheduleForm, ProfessionalCard, FAQModal } from '@/components/config';
 
@@ -56,6 +60,21 @@ export default function ConfiguracoesPage() {
   const [isFaqModalOpen, setIsFaqModalOpen] = useState(false);
   const [editingFaq, setEditingFaq] = useState<FAQResponse | null>(null);
   const [deletingFaqId, setDeletingFaqId] = useState<number | null>(null);
+
+  // User schedules (current user's professional schedule)
+  const [userSchedules, setUserSchedules] = useState<UserScheduleData[]>([]);
+
+  // Time offs
+  const [timeOffs, setTimeOffs] = useState<TimeOffResponse[]>([]);
+  const [isTimeOffModalOpen, setIsTimeOffModalOpen] = useState(false);
+  const [timeOffForm, setTimeOffForm] = useState<TimeOffData>({
+    start_date_time: '',
+    end_date_time: '',
+    reason: '',
+  });
+
+  // Service delete confirmation
+  const [deletingServiceId, setDeletingServiceId] = useState<number | null>(null);
 
   // Load initial data
   useEffect(() => {
@@ -107,14 +126,20 @@ export default function ConfiguracoesPage() {
 
     try {
       switch (tab) {
-        case 'professionals':
-          const [usersResponse, specialtiesResponse] = await Promise.all([
-            apiClient.listUsers(tenant.id),
-            apiClient.getSpecialties(),
-          ]);
+        case 'professionals': {
+          const [usersResponse, specialtiesResponse, userSchedulesResponse, timeOffsResponse] =
+            await Promise.all([
+              apiClient.listUsers(tenant.id),
+              apiClient.getSpecialties(),
+              apiClient.getUserSchedules(),
+              apiClient.listTimeOffs(),
+            ]);
           setUsers(usersResponse.data || []);
           setSpecialties(specialtiesResponse.data || []);
+          setUserSchedules(userSchedulesResponse.data || []);
+          setTimeOffs(timeOffsResponse.data || []);
           break;
+        }
 
         case 'schedules':
           const schedulesResponse = await apiClient.getTenantSchedules(tenant.id);
@@ -217,15 +242,108 @@ export default function ConfiguracoesPage() {
     setError('');
 
     try {
-      await apiClient.createService(tenant.id, serviceForm as ServiceData);
-      setSuccess('Serviço criado com sucesso!');
+      if (editingService) {
+        await apiClient.updateService(tenant.id, editingService.id, serviceForm as UpdateServiceData);
+        setSuccess('Serviço atualizado com sucesso!');
+        setEditingService(null);
+      } else {
+        await apiClient.createService(tenant.id, serviceForm as ServiceData);
+        setSuccess('Serviço criado com sucesso!');
+      }
       setTimeout(() => setSuccess(''), 3000);
       setServiceForm({});
       loadTabData('services');
     } catch (err) {
-      setError('Erro ao criar serviço');
+      setError(editingService ? 'Erro ao atualizar serviço' : 'Erro ao criar serviço');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleEditService = (service: ServiceResponse) => {
+    setEditingService(service);
+    setServiceForm({
+      name: service.name,
+      description: service.description || '',
+      duration_minutes: service.duration_minutes,
+      price_cents: service.price_cents,
+      requires_deposit: service.requires_deposit,
+      deposit_cents: service.deposit_cents ?? 0,
+    });
+  };
+
+  const handleCancelEditService = () => {
+    setEditingService(null);
+    setServiceForm({});
+  };
+
+  const handleDeleteService = async (serviceId: number) => {
+    if (!tenant) return;
+    if (typeof window !== 'undefined' && !window.confirm('Excluir este serviço? Esta ação não pode ser desfeita.')) return;
+
+    setDeletingServiceId(serviceId);
+    setError('');
+    try {
+      await apiClient.deleteService(tenant.id, serviceId);
+      setSuccess('Serviço excluído com sucesso!');
+      setTimeout(() => setSuccess(''), 3000);
+      loadTabData('services');
+    } catch (err) {
+      setError('Erro ao excluir serviço');
+    } finally {
+      setDeletingServiceId(null);
+    }
+  };
+
+  const handleSaveUserSchedules = async (schedules: UserScheduleData[]) => {
+    setSaving(true);
+    setError('');
+    try {
+      await apiClient.upsertUserSchedules(schedules);
+      setSuccess('Seus horários foram atualizados com sucesso!');
+      setTimeout(() => setSuccess(''), 3000);
+      loadTabData('professionals');
+    } catch (err) {
+      setError('Erro ao atualizar seus horários');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveTimeOff = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!timeOffForm.start_date_time || !timeOffForm.end_date_time) return;
+
+    setSaving(true);
+    setError('');
+    try {
+      await apiClient.createTimeOff({
+        start_date_time: new Date(timeOffForm.start_date_time).toISOString(),
+        end_date_time: new Date(timeOffForm.end_date_time).toISOString(),
+        reason: timeOffForm.reason || undefined,
+      });
+      setSuccess('Folga registrada com sucesso!');
+      setTimeout(() => setSuccess(''), 3000);
+      setIsTimeOffModalOpen(false);
+      setTimeOffForm({ start_date_time: '', end_date_time: '', reason: '' });
+      loadTabData('professionals');
+    } catch (err) {
+      setError('Erro ao registrar folga');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteTimeOff = async (timeOffId: number) => {
+    if (typeof window !== 'undefined' && !window.confirm('Excluir esta folga?')) return;
+    setError('');
+    try {
+      await apiClient.deleteTimeOff(timeOffId);
+      setSuccess('Folga excluída com sucesso!');
+      setTimeout(() => setSuccess(''), 3000);
+      loadTabData('professionals');
+    } catch (err) {
+      setError('Erro ao excluir folga');
     }
   };
 
@@ -235,7 +353,8 @@ export default function ConfiguracoesPage() {
     setQrLoading(true);
     try {
       const qrResponse = await apiClient.getQRCode(tenant.id);
-      setQrCode(qrResponse.base64 || qrResponse.qrcode);
+      // Usar base64 diretamente da resposta
+      setQrCode(qrResponse.base64);
     } catch (err) {
       setError('Erro ao carregar QR Code');
     } finally {
@@ -375,6 +494,11 @@ export default function ConfiguracoesPage() {
               onEditUser={handleEditUser}
               onSaveUser={handleSaveUser}
               onCancelEdit={() => setEditingUser(null)}
+              userSchedules={userSchedules}
+              onSaveUserSchedules={handleSaveUserSchedules}
+              timeOffs={timeOffs}
+              onAddTimeOff={() => setIsTimeOffModalOpen(true)}
+              onDeleteTimeOff={handleDeleteTimeOff}
               saving={saving}
             />
           )}
@@ -392,7 +516,12 @@ export default function ConfiguracoesPage() {
               services={services}
               serviceForm={serviceForm}
               setServiceForm={setServiceForm}
+              editingService={editingService}
               onSave={handleSaveService}
+              onEditService={handleEditService}
+              onCancelEditService={handleCancelEditService}
+              onDeleteService={handleDeleteService}
+              deletingServiceId={deletingServiceId}
               saving={saving}
             />
           )}
@@ -431,6 +560,64 @@ export default function ConfiguracoesPage() {
         initialData={editingFaq ? { question: editingFaq.question, answer: editingFaq.answer } : undefined}
         isLoading={saving}
       />
+
+      {/* Time Off Modal */}
+      {isTimeOffModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setIsTimeOffModalOpen(false)} />
+          <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold text-slate-900 mb-4">Nova folga</h3>
+            <form onSubmit={handleSaveTimeOff} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Início</label>
+                <input
+                  type="datetime-local"
+                  value={timeOffForm.start_date_time}
+                  onChange={(e) => setTimeOffForm((p) => ({ ...p, start_date_time: e.target.value }))}
+                  className="w-full px-4 py-2 border border-slate-200 rounded-lg"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Fim</label>
+                <input
+                  type="datetime-local"
+                  value={timeOffForm.end_date_time}
+                  onChange={(e) => setTimeOffForm((p) => ({ ...p, end_date_time: e.target.value }))}
+                  className="w-full px-4 py-2 border border-slate-200 rounded-lg"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Motivo (opcional)</label>
+                <input
+                  type="text"
+                  value={timeOffForm.reason || ''}
+                  onChange={(e) => setTimeOffForm((p) => ({ ...p, reason: e.target.value }))}
+                  className="w-full px-4 py-2 border border-slate-200 rounded-lg"
+                  placeholder="Ex: Férias, consulta..."
+                />
+              </div>
+              <div className="flex gap-2 justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsTimeOffModalOpen(false)}
+                  className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {saving ? 'Salvando...' : 'Registrar folga'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -594,6 +781,11 @@ interface ProfessionalsTabProps {
   onEditUser: (user: UserResponse) => void;
   onSaveUser: () => void;
   onCancelEdit: () => void;
+  userSchedules: UserScheduleData[];
+  onSaveUserSchedules: (schedules: UserScheduleData[]) => Promise<void>;
+  timeOffs: TimeOffResponse[];
+  onAddTimeOff: () => void;
+  onDeleteTimeOff: (timeOffId: number) => void;
   saving: boolean;
 }
 
@@ -606,6 +798,11 @@ function ProfessionalsTab({
   onEditUser,
   onSaveUser,
   onCancelEdit,
+  userSchedules,
+  onSaveUserSchedules,
+  timeOffs,
+  onAddTimeOff,
+  onDeleteTimeOff,
   saving,
 }: ProfessionalsTabProps) {
   if (editingUser) {
@@ -686,7 +883,7 @@ function ProfessionalsTab({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-8">
       <div className="mb-6">
         <h3 className="text-lg font-semibold text-slate-900 mb-2">Profissionais</h3>
         <p className="text-sm text-slate-600">
@@ -710,6 +907,67 @@ function ProfessionalsTab({
           ))}
         </div>
       )}
+
+      {/* Meus horários de atendimento */}
+      <div className="border-t border-slate-200 pt-6">
+        <h3 className="text-lg font-semibold text-slate-900 mb-2">Meus horários de atendimento</h3>
+        <p className="text-sm text-slate-600 mb-4">
+          Defina seus dias e horários de atendimento
+        </p>
+        <ScheduleForm
+          initialSchedules={userSchedules as TenantScheduleData[]}
+          onSave={(schedules) => onSaveUserSchedules(schedules as UserScheduleData[])}
+          isLoading={saving}
+        />
+      </div>
+
+      {/* Minhas folgas */}
+      <div className="border-t border-slate-200 pt-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900 mb-1">Minhas folgas</h3>
+            <p className="text-sm text-slate-600">Períodos em que você não atenderá</p>
+          </div>
+          <button
+            type="button"
+            onClick={onAddTimeOff}
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors"
+          >
+            <span className="material-symbols-outlined text-[18px]">add</span>
+            Adicionar folga
+          </button>
+        </div>
+        {timeOffs.length === 0 ? (
+          <p className="text-slate-500 text-sm">Nenhuma folga registrada</p>
+        ) : (
+          <ul className="space-y-2">
+            {timeOffs.map((to) => (
+              <li
+                key={to.id}
+                className="flex items-center justify-between border border-slate-200 rounded-lg p-3"
+              >
+                <div>
+                  <span className="text-sm font-medium text-slate-900">
+                    {new Date(to.start_date_time).toLocaleDateString('pt-BR')} –{' '}
+                    {new Date(to.end_date_time).toLocaleDateString('pt-BR')}
+                  </span>
+                  {to.reason && (
+                    <p className="text-xs text-slate-500 mt-0.5">{to.reason}</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onDeleteTimeOff(to.id)}
+                  className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                  title="Excluir folga"
+                >
+                  <span className="material-symbols-outlined text-[18px]">delete</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
@@ -743,11 +1001,27 @@ interface ServicesTabProps {
   services: ServiceResponse[];
   serviceForm: Partial<ServiceData>;
   setServiceForm: React.Dispatch<React.SetStateAction<Partial<ServiceData>>>;
+  editingService: ServiceResponse | null;
   onSave: (e: React.FormEvent) => void;
+  onEditService: (service: ServiceResponse) => void;
+  onCancelEditService: () => void;
+  onDeleteService: (serviceId: number) => void;
+  deletingServiceId: number | null;
   saving: boolean;
 }
 
-function ServicesTab({ services, serviceForm, setServiceForm, onSave, saving }: ServicesTabProps) {
+function ServicesTab({
+  services,
+  serviceForm,
+  setServiceForm,
+  editingService,
+  onSave,
+  onEditService,
+  onCancelEditService,
+  onDeleteService,
+  deletingServiceId,
+  saving,
+}: ServicesTabProps) {
   const updateField = (field: keyof ServiceData, value: string | number | boolean) => {
     setServiceForm((prev) => ({ ...prev, [field]: value }));
   };
@@ -788,14 +1062,46 @@ function ServicesTab({ services, serviceForm, setServiceForm, onSave, saving }: 
                   )}
                 </div>
               </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => onEditService(service)}
+                  className="p-2 text-primary hover:bg-primary/5 rounded-lg transition-colors"
+                  title="Editar"
+                >
+                  <span className="material-symbols-outlined text-[20px]">edit</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDeleteService(service.id)}
+                  disabled={deletingServiceId === service.id}
+                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                  title="Excluir"
+                >
+                  <span className="material-symbols-outlined text-[20px]">
+                    {deletingServiceId === service.id ? 'hourglass_empty' : 'delete'}
+                  </span>
+                </button>
+              </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Add Service Form */}
+      {/* Add / Edit Service Form */}
       <div className="border-t border-slate-200 pt-6">
-        <h4 className="font-semibold text-slate-900 mb-4">Adicionar Novo Serviço</h4>
+        <h4 className="font-semibold text-slate-900 mb-4">
+          {editingService ? 'Editar Serviço' : 'Adicionar Novo Serviço'}
+        </h4>
+        {editingService && (
+          <button
+            type="button"
+            onClick={onCancelEditService}
+            className="text-sm text-slate-600 hover:text-slate-900 mb-2"
+          >
+            Cancelar edição
+          </button>
+        )}
         <form onSubmit={onSave} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">
@@ -857,7 +1163,13 @@ function ServicesTab({ services, serviceForm, setServiceForm, onSave, saving }: 
               disabled={saving}
               className="px-6 py-3 bg-primary text-white font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
-              {saving ? 'Adicionando...' : 'Adicionar Serviço'}
+              {saving
+                ? editingService
+                  ? 'Atualizando...'
+                  : 'Adicionando...'
+                : editingService
+                  ? 'Atualizar Serviço'
+                  : 'Adicionar Serviço'}
             </button>
           </div>
         </form>

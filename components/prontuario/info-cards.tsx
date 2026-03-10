@@ -6,6 +6,7 @@ interface InfoCardsProps {
   vitalSigns: VitalSignResponse[];
   vitalSignTypes: VitalSignTypeResponse[];
   onAddVitalSign?: () => void;
+  onDeleteVitalSign?: (vitalSignId: number) => void;
 }
 
 interface ComingSoonBadgeProps {
@@ -20,7 +21,7 @@ function ComingSoonBadge({ className = '' }: ComingSoonBadgeProps) {
   );
 }
 
-export function InfoCards({ vitalSigns, vitalSignTypes, onAddVitalSign }: InfoCardsProps) {
+export function InfoCards({ vitalSigns, vitalSignTypes, onAddVitalSign, onDeleteVitalSign }: InfoCardsProps) {
   // Map vital sign type IDs to their names and units
   const vitalSignTypeMap = new Map(
     vitalSignTypes.map((type) => [type.id, { name: type.name, unit: type.unit }])
@@ -103,18 +104,30 @@ export function InfoCards({ vitalSigns, vitalSignTypes, onAddVitalSign }: InfoCa
             + Inserir
           </button>
         </div>
-        <div className="flex gap-4">
+        <div className="flex gap-4 flex-wrap">
           {latestVitalSigns.size > 0 ? (
             Array.from(latestVitalSigns.values()).slice(0, 3).map((vs) => {
               const typeInfo = vitalSignTypeMap.get(vs.vital_sign_type_id);
               return (
-                <div key={vs.id}>
-                  <span className="text-slate-500 block text-[9px]">
-                    {typeInfo?.name?.substring(0, 10) || 'N/A'}
-                  </span>
-                  <span className="font-bold text-slate-900 text-xs">
-                    {vs.value} {typeInfo?.unit || ''}
-                  </span>
+                <div key={vs.id} className="flex items-start gap-1">
+                  <div>
+                    <span className="text-slate-500 block text-[9px]">
+                      {typeInfo?.name?.substring(0, 10) || 'N/A'}
+                    </span>
+                    <span className="font-bold text-slate-900 text-xs">
+                      {vs.value} {typeInfo?.unit || ''}
+                    </span>
+                  </div>
+                  {onDeleteVitalSign && (
+                    <button
+                      type="button"
+                      onClick={() => onDeleteVitalSign(vs.id)}
+                      className="text-slate-400 hover:text-red-600 p-0.5 rounded"
+                      title="Excluir"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">close</span>
+                    </button>
+                  )}
                 </div>
               );
             })

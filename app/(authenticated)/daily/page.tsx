@@ -2,10 +2,34 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { apiClient, AppointmentResponse, CurrentUserResponse } from '@/lib/api';
+import { useRouter } from 'next/navigation';
+import { apiClient, AppointmentResponse, PatientResponse } from '@/lib/api';
+
+function ageFromDob(dob: string | undefined): string {
+  if (!dob) return '-';
+  const birth = new Date(dob);
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+  return String(age);
+}
+
+function formatStatus(status: string): string {
+  const map: Record<string, string> = {
+    PENDING: 'Aguardando',
+    CONFIRMED: 'Confirmado',
+    CANCELLED: 'Cancelado',
+    COMPLETED: 'Concluído',
+    NO_SHOW: 'Não compareceu',
+  };
+  return map[status] ?? status;
+}
 
 export default function DailyPage() {
+  const router = useRouter();
   const [appointments, setAppointments] = useState<AppointmentResponse[]>([]);
+  const [patients, setPatients] = useState<PatientResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentPatientIndex, setCurrentPatientIndex] = useState(0);
 
@@ -17,18 +41,20 @@ export default function DailyPage() {
         if (!tenantId) return;
 
         const today = new Date();
-        const startOfDay = new Date(today.setHours(0, 0, 0, 0)).toISOString();
-        const endOfDay = new Date(today.setHours(23, 59, 59, 999)).toISOString();
+        const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0).toISOString();
+        const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999).toISOString();
 
-        const appointmentsResponse = await apiClient.getAppointments(tenantId, {
-          start_date: startOfDay,
-          end_date: endOfDay,
-        });
+        const [appointmentsResponse, patientsResponse] = await Promise.all([
+          apiClient.getAppointments(tenantId, { start_date: startOfDay, end_date: endOfDay }),
+          apiClient.getPatients(tenantId),
+        ]);
 
-        const todayAppointments = (appointmentsResponse.data || [])
-          .sort((a, b) => new Date(a.date_time).getTime() - new Date(b.date_time).getTime());
+        const todayAppointments = (appointmentsResponse.data || []).filter(
+          (a) => a.status !== 'CANCELLED'
+        ).sort((a, b) => new Date(a.date_time).getTime() - new Date(b.date_time).getTime());
 
         setAppointments(todayAppointments);
+        setPatients(patientsResponse.data || []);
       } catch (error) {
         console.error('Error loading daily data:', error);
       } finally {
@@ -41,6 +67,16 @@ export default function DailyPage() {
 
   const currentPatient = appointments[currentPatientIndex];
   const remainingPatients = appointments.slice(currentPatientIndex + 1);
+  const currentPatientData = currentPatient
+    ? patients.find((p) => p.id === currentPatient.patient_id)
+    : undefined;
+  const age = currentPatientData ? ageFromDob(currentPatientData.dob) : '-';
+  const sexLabel =
+    currentPatientData?.sex === 'M'
+      ? 'Masculino'
+      : currentPatientData?.sex === 'F'
+        ? 'Feminino'
+        : '-';
 
   const formatTime = (dateTime: string) => {
     return new Date(dateTime).toLocaleTimeString('pt-BR', {
@@ -172,26 +208,26 @@ export default function DailyPage() {
                     </span>
                   </div>
                   <div className="text-sm text-slate-600 mb-2.5">
-                    <span className="font-medium">45 anos</span>
+                    <span className="font-medium">{age} anos</span>
                     <span className="mx-2 text-slate-400">•</span>
-                    <span className="font-medium">Masculino</span>
+                    <span className="font-medium">{sexLabel}</span>
                     <span className="mx-2 text-slate-400">•</span>
-                    <span className="text-primary font-semibold">Chegou às {formatTime(currentPatient.date_time)} (15 min de espera)</span>
+                    <span className="text-primary font-semibold">{formatTime(currentPatient.date_time)}</span>
                   </div>
-                  <Link href="#" className="text-sm text-primary hover:text-primary/80 font-semibold inline-flex items-center gap-1.5 transition-colors">
+                  <Link href={`/prontuarios`} className="text-sm text-primary hover:text-primary/80 font-semibold inline-flex items-center gap-1.5 transition-colors">
                     <span className="material-symbols-outlined text-[18px]">description</span>
                     Histórico Completo
                   </Link>
                 </div>
               </div>
 
-              {/* Complaint */}
+              {/* Complaint / Service */}
               <div className="mb-5 bg-slate-50 rounded-xl p-4 border border-slate-100">
                 <div className="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-2">
-                  QUEIXA PRINCIPAL / MOTIVO DA VISITA
+                  SERVIÇO / MOTIVO DA VISITA
                 </div>
                 <p className="text-sm text-slate-700 italic leading-relaxed">
-                  "{currentPatient.notes || 'Palpitações frequentes e cansaço excessivo ao realizar esforços moderados nos últimos 3 meses.'}"
+                  {currentPatient.service_name || currentPatient.notes || '-'}
                 </p>
               </div>
 
@@ -221,11 +257,19 @@ export default function DailyPage() {
                     AÇÕES RÁPIDAS DE ALTA VAZÃO
                   </div>
                   <div className="grid grid-cols-2 gap-2.5">
-                    <button className="flex flex-col items-center justify-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl hover:bg-white hover:border-slate-300 hover:shadow-md transition-all group">
+                    <button
+                      type="button"
+                      onClick={() => router.push(`/prontuarios/${currentPatient.id}`)}
+                      className="flex flex-col items-center justify-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl hover:bg-white hover:border-slate-300 hover:shadow-md transition-all group"
+                    >
                       <span className="material-symbols-outlined text-[22px] text-slate-600 group-hover:text-slate-900 transition-colors">edit_note</span>
                       <span className="text-[10px] font-bold text-slate-700 uppercase">Prescrever</span>
                     </button>
-                    <button className="flex flex-col items-center justify-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl hover:bg-white hover:border-slate-300 hover:shadow-md transition-all group">
+                    <button
+                      type="button"
+                      onClick={() => router.push(`/prontuarios/${currentPatient.id}`)}
+                      className="flex flex-col items-center justify-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl hover:bg-white hover:border-slate-300 hover:shadow-md transition-all group"
+                    >
                       <span className="material-symbols-outlined text-[22px] text-slate-600 group-hover:text-slate-900 transition-colors">science</span>
                       <span className="text-[10px] font-bold text-slate-700 uppercase">Exames</span>
                     </button>
@@ -242,7 +286,11 @@ export default function DailyPage() {
               </div>
 
               {/* Action Button */}
-              <button className="w-full flex items-center justify-center gap-2.5 py-4 bg-gradient-to-r from-primary to-blue-600 text-white rounded-xl font-bold hover:from-primary/90 hover:to-blue-500 hover:shadow-lg transform hover:scale-[1.02] transition-all">
+              <button
+                type="button"
+                onClick={() => router.push(`/prontuarios/${currentPatient.id}`)}
+                className="w-full flex items-center justify-center gap-2.5 py-4 bg-gradient-to-r from-primary to-blue-600 text-white rounded-xl font-bold hover:from-primary/90 hover:to-blue-500 hover:shadow-lg transform hover:scale-[1.02] transition-all"
+              >
                 <span className="material-symbols-outlined text-[22px]">play_circle</span>
                 Iniciar Consulta Agora
               </button>
@@ -290,8 +338,6 @@ export default function DailyPage() {
         <div className="p-3">
           {remainingPatients.slice(0, 4).map((appointment, index) => {
             const initials = appointment.patient_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
-            const statuses = ['Triagem concluída', 'Aguardando triagem', 'Check-in realizado', 'Confirmado'];
-            
             return (
               <div key={appointment.id} className="mb-2 p-3.5 bg-white border border-slate-200/50 rounded-xl hover:border-primary/30 hover:bg-primary/5 hover:shadow-md cursor-pointer transition-all group">
                 <div className="flex items-center gap-3">
@@ -310,7 +356,7 @@ export default function DailyPage() {
                       )}
                     </div>
                     <p className="text-xs text-slate-500 font-medium">
-                      {formatTime(appointment.date_time)} • {statuses[index] || 'Confirmado'}
+                      {formatTime(appointment.date_time)} • {formatStatus(appointment.status)}
                     </p>
                   </div>
                 </div>

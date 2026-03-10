@@ -9,6 +9,7 @@ import {
   VitalSignResponse,
   VitalSignTypeResponse,
   PrescriptionResponse,
+  TestRequestResponse,
   ChatMessage,
   CurrentUserResponse,
 } from '@/lib/api';
@@ -31,9 +32,14 @@ export default function ProntuarioDetailPage() {
   const [vitalSigns, setVitalSigns] = useState<VitalSignResponse[]>([]);
   const [vitalSignTypes, setVitalSignTypes] = useState<VitalSignTypeResponse[]>([]);
   const [prescriptions, setPrescriptions] = useState<PrescriptionResponse[]>([]);
+  const [testRequests, setTestRequests] = useState<TestRequestResponse[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatMinimized, setChatMinimized] = useState(false);
   const [isWhatsAppConnected, setIsWhatsAppConnected] = useState(false);
+
+  const [isVitalSignModalOpen, setIsVitalSignModalOpen] = useState(false);
+  const [vitalSignForm, setVitalSignForm] = useState({ value: '', vital_sign_type_id: 0 });
+  const [newTestRequest, setNewTestRequest] = useState('');
 
   const loadData = useCallback(async () => {
     try {
@@ -68,6 +74,10 @@ export default function ProntuarioDetailPage() {
       // Load prescriptions
       const prescriptionsResponse = await apiClient.getPrescriptions(tenantId, appointmentId);
       setPrescriptions(prescriptionsResponse.data || []);
+
+      // Load test requests
+      const testRequestsResponse = await apiClient.getTestRequests(tenantId, appointmentId);
+      setTestRequests(testRequestsResponse.data || []);
 
       // Try to load chat messages if patient has phone
       if (patientData.phone_number) {
@@ -138,13 +148,77 @@ export default function ProntuarioDetailPage() {
     }
   };
 
+  const handleRemovePrescription = async (prescriptionId: number) => {
+    const tenantId = userData?.user?.tenant_id;
+    if (!tenantId) return;
+    try {
+      await apiClient.deletePrescription(tenantId, prescriptionId);
+      setPrescriptions((prev) => prev.filter((p) => p.id !== prescriptionId));
+    } catch (error) {
+      console.error('Error deleting prescription:', error);
+    }
+  };
+
+  const handleSaveVitalSign = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const tenantId = userData?.user?.tenant_id;
+    if (!tenantId || !vitalSignForm.vital_sign_type_id || !vitalSignForm.value.trim()) return;
+    try {
+      const created = await apiClient.createVitalSign(tenantId, appointmentId, {
+        vital_sign_type_id: vitalSignForm.vital_sign_type_id,
+        value: vitalSignForm.value.trim(),
+      });
+      setVitalSigns((prev) => [...prev, created]);
+      setIsVitalSignModalOpen(false);
+      setVitalSignForm({ value: '', vital_sign_type_id: vitalSignTypes[0]?.id ?? 0 });
+    } catch (error) {
+      console.error('Error creating vital sign:', error);
+    }
+  };
+
+  const handleDeleteVitalSign = async (vitalSignId: number) => {
+    const tenantId = userData?.user?.tenant_id;
+    if (!tenantId) return;
+    try {
+      await apiClient.deleteVitalSign(tenantId, vitalSignId);
+      setVitalSigns((prev) => prev.filter((vs) => vs.id !== vitalSignId));
+    } catch (error) {
+      console.error('Error deleting vital sign:', error);
+    }
+  };
+
+  const handleAddTestRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const tenantId = userData?.user?.tenant_id;
+    if (!tenantId || !newTestRequest.trim()) return;
+    try {
+      const created = await apiClient.createTestRequest(tenantId, appointmentId, {
+        test: newTestRequest.trim(),
+      });
+      setTestRequests((prev) => [...prev, created]);
+      setNewTestRequest('');
+    } catch (error) {
+      console.error('Error creating test request:', error);
+    }
+  };
+
+  const handleDeleteTestRequest = async (testRequestId: number) => {
+    const tenantId = userData?.user?.tenant_id;
+    if (!tenantId) return;
+    try {
+      await apiClient.deleteTestRequest(tenantId, testRequestId);
+      setTestRequests((prev) => prev.filter((tr) => tr.id !== testRequestId));
+    } catch (error) {
+      console.error('Error deleting test request:', error);
+    }
+  };
+
   const handleFinalize = () => {
-    // TODO: Implement finalization logic
+    if (typeof window !== 'undefined' && !window.confirm('Finalizar atendimento e voltar à lista?')) return;
     router.push('/prontuarios');
   };
 
   const handleViewHistory = () => {
-    // TODO: Implement history view
     alert('Funcionalidade em breve');
   };
 
@@ -196,7 +270,14 @@ export default function ProntuarioDetailPage() {
                 <InfoCards
                   vitalSigns={vitalSigns}
                   vitalSignTypes={vitalSignTypes}
-                  onAddVitalSign={() => alert('Funcionalidade em breve')}
+                  onAddVitalSign={() => {
+                setVitalSignForm({
+                  value: '',
+                  vital_sign_type_id: vitalSignTypes[0]?.id ?? 0,
+                });
+                setIsVitalSignModalOpen(true);
+              }}
+                  onDeleteVitalSign={handleDeleteVitalSign}
                 />
               </div>
             </div>
@@ -205,7 +286,53 @@ export default function ProntuarioDetailPage() {
             <DiagnosisSection
               prescriptions={prescriptions}
               onAddPrescription={handleAddPrescription}
+              onRemovePrescription={handleRemovePrescription}
             />
+
+            {/* Test Requests */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col gap-4">
+              <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wide flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary text-[20px]">science</span>
+                Solicitações de Exames
+              </h3>
+              <form onSubmit={handleAddTestRequest} className="flex gap-2 flex-wrap">
+                <input
+                  type="text"
+                  value={newTestRequest}
+                  onChange={(e) => setNewTestRequest(e.target.value)}
+                  placeholder="Ex: Hemograma, Glicemia..."
+                  className="flex-1 min-w-[180px] px-4 py-2 border border-slate-200 rounded-lg text-sm focus:ring-1 focus:ring-primary focus:border-primary"
+                />
+                <button
+                  type="submit"
+                  disabled={!newTestRequest.trim()}
+                  className="px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 disabled:opacity-50"
+                >
+                  Adicionar
+                </button>
+              </form>
+              <div className="flex flex-wrap gap-2">
+                {testRequests.length === 0 ? (
+                  <span className="text-slate-400 text-sm italic">Nenhum exame solicitado</span>
+                ) : (
+                  testRequests.map((tr) => (
+                    <span
+                      key={tr.id}
+                      className="inline-flex items-center gap-1 bg-slate-100 text-slate-800 text-sm font-medium px-3 py-1.5 rounded-lg border border-slate-200"
+                    >
+                      {tr.test}
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteTestRequest(tr.id)}
+                        className="text-slate-400 hover:text-red-600 transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">close</span>
+                      </button>
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
 
             {/* Medical Notes */}
             <MedicalNotes />
@@ -247,6 +374,62 @@ export default function ProntuarioDetailPage() {
               isMiniMode={false}
               onToggleMode={() => setChatMinimized(true)}
             />
+          </div>
+        </div>
+      )}
+
+      {/* Vital Sign Modal */}
+      {isVitalSignModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setIsVitalSignModalOpen(false)} />
+          <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-sm mx-4">
+            <h3 className="text-lg font-semibold text-slate-900 mb-4">Registrar sinal vital</h3>
+            <form onSubmit={handleSaveVitalSign} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Tipo</label>
+                <select
+                  value={vitalSignForm.vital_sign_type_id || ''}
+                  onChange={(e) =>
+                    setVitalSignForm((p) => ({ ...p, vital_sign_type_id: Number(e.target.value) }))
+                  }
+                  className="w-full px-4 py-2 border border-slate-200 rounded-lg"
+                  required
+                >
+                  <option value="">Selecione</option>
+                  {vitalSignTypes.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name} ({t.unit})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Valor</label>
+                <input
+                  type="text"
+                  value={vitalSignForm.value}
+                  onChange={(e) => setVitalSignForm((p) => ({ ...p, value: e.target.value }))}
+                  placeholder="Ex: 120, 36.5"
+                  className="w-full px-4 py-2 border border-slate-200 rounded-lg"
+                  required
+                />
+              </div>
+              <div className="flex gap-2 justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsVitalSignModalOpen(false)}
+                  className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90"
+                >
+                  Registrar
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

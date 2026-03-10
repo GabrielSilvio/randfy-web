@@ -1,7 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { AppointmentData, PatientResponse } from '@/lib/api';
+import { AppointmentData, PatientResponse, ServiceResponse } from '@/lib/api';
+
+interface ProfessionalOption {
+  id: number;
+  name: string;
+}
 
 interface AppointmentModalProps {
   isOpen: boolean;
@@ -9,48 +14,55 @@ interface AppointmentModalProps {
   onSave: (data: AppointmentData) => Promise<void>;
   isLoading?: boolean;
   patients: PatientResponse[];
+  services: ServiceResponse[];
+  professionals: ProfessionalOption[];
 }
 
-const INITIAL_FORM: AppointmentData & { service_name: string } = {
+const INITIAL_FORM: AppointmentData & { service_name: string; notes?: string; status?: string } = {
   patient_id: 0,
-  service_id: 1, // Default service ID
+  service_id: 0,
+  professional_id: 0,
   date_time: '',
   notes: '',
   status: 'PENDING',
-  service_name: 'Consulta',
+  service_name: '',
 };
 
-// Common services for healthcare
-const SERVICES = [
-  { id: 1, name: 'Consulta' },
-  { id: 2, name: 'Retorno' },
-  { id: 3, name: 'Avaliação' },
-  { id: 4, name: 'Exame' },
-  { id: 5, name: 'Procedimento' },
-];
-
-export function AppointmentModal({ isOpen, onClose, onSave, isLoading = false, patients }: AppointmentModalProps) {
+export function AppointmentModal({
+  isOpen,
+  onClose,
+  onSave,
+  isLoading = false,
+  patients,
+  services = [],
+  professionals = [],
+}: AppointmentModalProps) {
   const [form, setForm] = useState(INITIAL_FORM);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     if (isOpen) {
-      // Set default date/time to next available slot (next hour)
       const now = new Date();
       now.setHours(now.getHours() + 1);
       now.setMinutes(0);
       now.setSeconds(0);
       now.setMilliseconds(0);
-      
-      // Format to datetime-local format
       const defaultDateTime = now.toISOString().slice(0, 16);
-      
-      setForm({ ...INITIAL_FORM, date_time: defaultDateTime });
+      const defaultServiceId = services.length > 0 ? services[0].id : 0;
+      const defaultProfessionalId = professionals.length > 0 ? professionals[0].id : 0;
+      const defaultServiceName = services.length > 0 ? services[0].name : '';
+      setForm({
+        ...INITIAL_FORM,
+        date_time: defaultDateTime,
+        service_id: defaultServiceId,
+        professional_id: defaultProfessionalId,
+        service_name: defaultServiceName,
+      });
       setErrors({});
       setSearchTerm('');
     }
-  }, [isOpen]);
+  }, [isOpen, services, professionals]);
 
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
@@ -74,6 +86,10 @@ export function AppointmentModal({ isOpen, onClose, onSave, isLoading = false, p
       newErrors.service_id = 'Selecione um serviço';
     }
 
+    if (!form.professional_id) {
+      newErrors.professional_id = 'Selecione um profissional';
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -89,14 +105,9 @@ export function AppointmentModal({ isOpen, onClose, onSave, isLoading = false, p
     const appointmentData: AppointmentData = {
       patient_id: form.patient_id,
       service_id: form.service_id,
+      professional_id: form.professional_id,
       date_time: formattedDateTime,
-      status: form.status,
     };
-
-    // Only include notes if provided
-    if (form.notes && form.notes.trim()) {
-      appointmentData.notes = form.notes.trim();
-    }
 
     await onSave(appointmentData);
   };
@@ -229,13 +240,45 @@ export function AppointmentModal({ isOpen, onClose, onSave, isLoading = false, p
             )}
           </div>
 
+          {/* Professional Selection */}
+          {professionals.length > 0 && (
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                Profissional <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={form.professional_id}
+                onChange={(e) => {
+                  setForm({ ...form, professional_id: Number(e.target.value) });
+                  setErrors({ ...errors, professional_id: '' });
+                }}
+                className={`w-full px-4 py-2.5 border rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all appearance-none bg-white cursor-pointer ${
+                  errors.professional_id ? 'border-red-300 bg-red-50' : 'border-slate-200'
+                }`}
+              >
+                <option value={0}>Selecione o profissional</option>
+                {professionals.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              {errors.professional_id && (
+                <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                  <span className="material-symbols-outlined text-[14px]">error</span>
+                  {errors.professional_id}
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Service Selection */}
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1.5">
               Tipo de Serviço <span className="text-red-500">*</span>
             </label>
             <div className="grid grid-cols-2 gap-2">
-              {SERVICES.map((service) => (
+              {services.map((service) => (
                 <button
                   key={service.id}
                   type="button"
@@ -253,6 +296,9 @@ export function AppointmentModal({ isOpen, onClose, onSave, isLoading = false, p
                 </button>
               ))}
             </div>
+            {services.length === 0 && (
+              <p className="text-sm text-slate-500">Nenhum serviço cadastrado.</p>
+            )}
             {errors.service_id && (
               <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
                 <span className="material-symbols-outlined text-[14px]">error</span>
@@ -288,35 +334,6 @@ export function AppointmentModal({ isOpen, onClose, onSave, isLoading = false, p
                 {errors.date_time}
               </p>
             )}
-          </div>
-
-          {/* Status */}
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-              Status
-            </label>
-            <select
-              value={form.status}
-              onChange={(e) => setForm({ ...form, status: e.target.value as 'PENDING' | 'CONFIRMED' })}
-              className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all appearance-none bg-white cursor-pointer"
-            >
-              <option value="PENDING">Aguardando confirmação</option>
-              <option value="CONFIRMED">Confirmado</option>
-            </select>
-          </div>
-
-          {/* Notes */}
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-              Observações <span className="text-slate-400 text-xs font-normal">(opcional)</span>
-            </label>
-            <textarea
-              value={form.notes || ''}
-              onChange={(e) => setForm({ ...form, notes: e.target.value })}
-              className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-none"
-              placeholder="Adicione observações sobre o agendamento..."
-              rows={3}
-            />
           </div>
 
           {/* Actions */}

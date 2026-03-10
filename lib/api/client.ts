@@ -99,7 +99,11 @@ export interface StateResponse {
 export interface QRCodeResponse {
   base64: string;
   code: string;
-  qrcode: string;
+  qrcode?: string;
+}
+
+export interface QRCodeDataResponse {
+  data: QRCodeResponse;
 }
 
 export interface LoginResponse {
@@ -303,6 +307,66 @@ export interface TenantScheduleResponse extends TenantScheduleData {
   updated_at: string;
 }
 
+// ==================== USER SCHEDULE INTERFACES ====================
+
+export interface UserScheduleData {
+  day_of_week: number;
+  start_time: number;
+  end_time: number;
+}
+
+export interface UserScheduleResponse extends UserScheduleData {
+  id: number;
+  user_id: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// ==================== TIME OFF INTERFACES ====================
+
+export interface TimeOffData {
+  reason?: string;
+  start_date_time: string;
+  end_date_time: string;
+}
+
+export interface TimeOffResponse {
+  id: number;
+  reason?: string;
+  start_date_time: string;
+  end_date_time: string;
+  user_id: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// ==================== UPDATE PAYLOAD INTERFACES ====================
+
+export interface UpdateServiceData {
+  name?: string;
+  description?: string;
+  duration_minutes?: number;
+  price_cents?: number;
+  requires_deposit?: boolean;
+  deposit_cents?: number;
+}
+
+export interface UpdateVitalSignData {
+  value?: string;
+  vital_sign_type_id?: number;
+}
+
+export interface UpdatePrescriptionData {
+  medication_id?: number;
+  medication_name?: string;
+  duration_days?: number;
+  detail?: string;
+}
+
+export interface UpdateTestRequestData {
+  test?: string;
+}
+
 // ==================== FAQ INTERFACES ====================
 
 export interface FAQData {
@@ -360,12 +424,16 @@ export interface IApiClient {
   // Services
   createService(tenantId: number, data: ServiceData): Promise<ServiceResponse>;
   getServices(tenantId: number): Promise<{ data: ServiceResponse[] }>;
+  getService(tenantId: number, serviceId: number): Promise<ServiceResponse>;
+  updateService(tenantId: number, serviceId: number, data: UpdateServiceData): Promise<ServiceResponse>;
+  deleteService(tenantId: number, serviceId: number): Promise<void>;
 
   // Patients
   getPatients(tenantId: number): Promise<{ data: PatientResponse[] }>;
   getPatient(tenantId: number, patientId: number): Promise<PatientResponse>;
   createPatient(tenantId: number, data: PatientData): Promise<PatientResponse>;
   updatePatient(tenantId: number, patientId: number, data: Partial<PatientData>): Promise<PatientResponse>;
+  deletePatient(tenantId: number, patientId: number): Promise<void>;
 
   // Appointments
   getAppointments(tenantId: number, filters?: AppointmentFilters): Promise<{ data: AppointmentResponse[] }>;
@@ -377,19 +445,29 @@ export interface IApiClient {
   getVitalSigns(tenantId: number, appointmentId: number): Promise<{ data: VitalSignResponse[] }>;
   createVitalSign(tenantId: number, appointmentId: number, data: VitalSignData): Promise<VitalSignResponse>;
   getVitalSignTypes(): Promise<{ data: VitalSignTypeResponse[] }>;
+  getVitalSign(tenantId: number, vitalSignId: number): Promise<VitalSignResponse>;
+  updateVitalSign(tenantId: number, vitalSignId: number, data: UpdateVitalSignData): Promise<VitalSignResponse>;
+  deleteVitalSign(tenantId: number, vitalSignId: number): Promise<void>;
 
   // Prescriptions
   getPrescriptions(tenantId: number, appointmentId: number): Promise<{ data: PrescriptionResponse[] }>;
   createPrescription(tenantId: number, appointmentId: number, data: PrescriptionData): Promise<PrescriptionResponse>;
+  getPrescription(tenantId: number, prescriptionId: number): Promise<PrescriptionResponse>;
+  updatePrescription(tenantId: number, prescriptionId: number, data: UpdatePrescriptionData): Promise<PrescriptionResponse>;
+  deletePrescription(tenantId: number, prescriptionId: number): Promise<void>;
 
   // Test Requests
   getTestRequests(tenantId: number, appointmentId: number): Promise<{ data: TestRequestResponse[] }>;
   createTestRequest(tenantId: number, appointmentId: number, data: TestRequestData): Promise<TestRequestResponse>;
+  getTestRequest(tenantId: number, testRequestId: number): Promise<TestRequestResponse>;
+  updateTestRequest(tenantId: number, testRequestId: number, data: UpdateTestRequestData): Promise<TestRequestResponse>;
+  deleteTestRequest(tenantId: number, testRequestId: number): Promise<void>;
 
   // Chat
   getConversations(tenantId: number): Promise<{ conversations: ChatConversation[] }>;
   getMessages(tenantId: number, phoneNumber: string, limit?: number, page?: number): Promise<{ messages: ChatMessage[] }>;
   sendMessage(tenantId: number, data: SendMessageData): Promise<SendMessageResponse>;
+  streamMessages(tenantId: number): EventSource | null;
 
   // Users (Professionals)
   listUsers(tenantId: number): Promise<{ data: UserResponse[] }>;
@@ -405,6 +483,17 @@ export interface IApiClient {
   // Tenant Schedules
   upsertTenantSchedules(tenantId: number, schedules: TenantScheduleData[]): Promise<{ data: TenantScheduleResponse[] }>;
   getTenantSchedules(tenantId: number): Promise<{ data: TenantScheduleResponse[] }>;
+
+  // User Schedules
+  upsertUserSchedules(schedules: UserScheduleData[]): Promise<{ data: UserScheduleResponse[] }>;
+  getUserSchedules(): Promise<{ data: UserScheduleResponse[] }>;
+
+  // Time Offs
+  createTimeOff(data: TimeOffData): Promise<TimeOffResponse>;
+  listTimeOffs(): Promise<{ data: TimeOffResponse[] }>;
+  getTimeOff(timeOffId: number): Promise<TimeOffResponse>;
+  updateTimeOff(timeOffId: number, data: Partial<TimeOffData>): Promise<TimeOffResponse>;
+  deleteTimeOff(timeOffId: number): Promise<void>;
 
   // FAQs
   createFAQ(tenantId: number, data: FAQData): Promise<FAQResponse>;
@@ -729,7 +818,7 @@ export class ApiClient implements IApiClient {
     try {
       const headers = await this.getAuthHeaders();
 
-      const result = await this.requestManager.fetch<QRCodeResponse>(
+      const result = await this.requestManager.fetch<QRCodeResponse | QRCodeDataResponse>(
         `${this.config.baseUrl}/api/tenants/${tenantId}/qrcode`,
         {
           method: 'GET',
@@ -738,13 +827,16 @@ export class ApiClient implements IApiClient {
         }
       );
 
+      // Extrair data se vier wrapped em { data: ... }
+      const qrData = unwrapResponse(result);
+
       logger.info('Got QR code', {
         operation: 'getQRCode',
         tenantId,
         duration: Date.now() - startTime,
       });
 
-      return result;
+      return qrData;
     } catch (error) {
       logger.error('Failed to get QR code', {
         operation: 'getQRCode',
@@ -853,6 +945,113 @@ export class ApiClient implements IApiClient {
     } catch (error) {
       logger.error('Failed to get services', {
         operation: 'getServices',
+        error,
+        duration: Date.now() - startTime,
+      });
+      this.handleNetworkError(error);
+    }
+  }
+
+  async getService(tenantId: number, serviceId: number): Promise<ServiceResponse> {
+    const startTime = Date.now();
+
+    try {
+      const headers = await this.getAuthHeaders();
+
+      const result = await this.requestManager.fetch<ServiceResponse | { data: ServiceResponse }>(
+        `${this.config.baseUrl}/api/tenants/${tenantId}/services/${serviceId}`,
+        {
+          method: 'GET',
+          headers,
+          timeout: 10000,
+        }
+      );
+
+      const service = unwrapResponse(result);
+
+      logger.info('Got service', {
+        operation: 'getService',
+        tenantId,
+        serviceId,
+        duration: Date.now() - startTime,
+      });
+
+      return service;
+    } catch (error) {
+      logger.error('Failed to get service', {
+        operation: 'getService',
+        error,
+        duration: Date.now() - startTime,
+      });
+      this.handleNetworkError(error);
+    }
+  }
+
+  async updateService(
+    tenantId: number,
+    serviceId: number,
+    data: UpdateServiceData
+  ): Promise<ServiceResponse> {
+    const startTime = Date.now();
+
+    try {
+      const headers = await this.getAuthHeaders();
+
+      const result = await this.requestManager.fetch<ServiceResponse | { data: ServiceResponse }>(
+        `${this.config.baseUrl}/api/tenants/${tenantId}/services/${serviceId}`,
+        {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify(data),
+          timeout: 10000,
+        }
+      );
+
+      const service = unwrapResponse(result);
+
+      logger.info('Service updated', {
+        operation: 'updateService',
+        tenantId,
+        serviceId,
+        duration: Date.now() - startTime,
+      });
+
+      return service;
+    } catch (error) {
+      logger.error('Failed to update service', {
+        operation: 'updateService',
+        error,
+        duration: Date.now() - startTime,
+      });
+      this.handleNetworkError(error);
+    }
+  }
+
+  async deleteService(tenantId: number, serviceId: number): Promise<void> {
+    const startTime = Date.now();
+
+    try {
+      const headers = await this.getAuthHeaders();
+
+      await this.requestManager.fetch<void>(
+        `${this.config.baseUrl}/api/tenants/${tenantId}/services/${serviceId}`,
+        {
+          method: 'DELETE',
+          headers,
+          timeout: 10000,
+          dedupe: true,
+        }
+      );
+
+      logger.info('Service deleted', {
+        operation: 'deleteService',
+        tenantId,
+        serviceId,
+        duration: Date.now() - startTime,
+      });
+    } catch (error) {
+      logger.error('Failed to delete service', {
+        operation: 'deleteService',
         error,
         duration: Date.now() - startTime,
       });
@@ -996,6 +1195,38 @@ export class ApiClient implements IApiClient {
     } catch (error) {
       logger.error('Failed to update patient', {
         operation: 'updatePatient',
+        error,
+        duration: Date.now() - startTime,
+      });
+      this.handleNetworkError(error);
+    }
+  }
+
+  async deletePatient(tenantId: number, patientId: number): Promise<void> {
+    const startTime = Date.now();
+
+    try {
+      const headers = await this.getAuthHeaders();
+
+      await this.requestManager.fetch<void>(
+        `${this.config.baseUrl}/api/tenants/${tenantId}/patients/${patientId}`,
+        {
+          method: 'DELETE',
+          headers,
+          timeout: 10000,
+          dedupe: true,
+        }
+      );
+
+      logger.info('Patient deleted', {
+        operation: 'deletePatient',
+        tenantId,
+        patientId,
+        duration: Date.now() - startTime,
+      });
+    } catch (error) {
+      logger.error('Failed to delete patient', {
+        operation: 'deletePatient',
         error,
         duration: Date.now() - startTime,
       });
@@ -1258,6 +1489,113 @@ export class ApiClient implements IApiClient {
     }
   }
 
+  async getVitalSign(tenantId: number, vitalSignId: number): Promise<VitalSignResponse> {
+    const startTime = Date.now();
+
+    try {
+      const headers = await this.getAuthHeaders();
+
+      const result = await this.requestManager.fetch<VitalSignResponse | { data: VitalSignResponse }>(
+        `${this.config.baseUrl}/api/tenants/${tenantId}/vital-signs/${vitalSignId}`,
+        {
+          method: 'GET',
+          headers,
+          timeout: 10000,
+        }
+      );
+
+      const vitalSign = unwrapResponse(result);
+
+      logger.info('Got vital sign', {
+        operation: 'getVitalSign',
+        tenantId,
+        vitalSignId,
+        duration: Date.now() - startTime,
+      });
+
+      return vitalSign;
+    } catch (error) {
+      logger.error('Failed to get vital sign', {
+        operation: 'getVitalSign',
+        error,
+        duration: Date.now() - startTime,
+      });
+      this.handleNetworkError(error);
+    }
+  }
+
+  async updateVitalSign(
+    tenantId: number,
+    vitalSignId: number,
+    data: UpdateVitalSignData
+  ): Promise<VitalSignResponse> {
+    const startTime = Date.now();
+
+    try {
+      const headers = await this.getAuthHeaders();
+
+      const result = await this.requestManager.fetch<VitalSignResponse | { data: VitalSignResponse }>(
+        `${this.config.baseUrl}/api/tenants/${tenantId}/vital-signs/${vitalSignId}`,
+        {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify(data),
+          timeout: 10000,
+        }
+      );
+
+      const vitalSign = unwrapResponse(result);
+
+      logger.info('Vital sign updated', {
+        operation: 'updateVitalSign',
+        tenantId,
+        vitalSignId,
+        duration: Date.now() - startTime,
+      });
+
+      return vitalSign;
+    } catch (error) {
+      logger.error('Failed to update vital sign', {
+        operation: 'updateVitalSign',
+        error,
+        duration: Date.now() - startTime,
+      });
+      this.handleNetworkError(error);
+    }
+  }
+
+  async deleteVitalSign(tenantId: number, vitalSignId: number): Promise<void> {
+    const startTime = Date.now();
+
+    try {
+      const headers = await this.getAuthHeaders();
+
+      await this.requestManager.fetch<void>(
+        `${this.config.baseUrl}/api/tenants/${tenantId}/vital-signs/${vitalSignId}`,
+        {
+          method: 'DELETE',
+          headers,
+          timeout: 10000,
+          dedupe: true,
+        }
+      );
+
+      logger.info('Vital sign deleted', {
+        operation: 'deleteVitalSign',
+        tenantId,
+        vitalSignId,
+        duration: Date.now() - startTime,
+      });
+    } catch (error) {
+      logger.error('Failed to delete vital sign', {
+        operation: 'deleteVitalSign',
+        error,
+        duration: Date.now() - startTime,
+      });
+      this.handleNetworkError(error);
+    }
+  }
+
   // ==================== PRESCRIPTION METHODS ====================
 
   async getPrescriptions(tenantId: number, appointmentId: number): Promise<{ data: PrescriptionResponse[] }> {
@@ -1332,6 +1670,113 @@ export class ApiClient implements IApiClient {
     }
   }
 
+  async getPrescription(tenantId: number, prescriptionId: number): Promise<PrescriptionResponse> {
+    const startTime = Date.now();
+
+    try {
+      const headers = await this.getAuthHeaders();
+
+      const result = await this.requestManager.fetch<PrescriptionResponse | { data: PrescriptionResponse }>(
+        `${this.config.baseUrl}/api/tenants/${tenantId}/prescriptions/${prescriptionId}`,
+        {
+          method: 'GET',
+          headers,
+          timeout: 10000,
+        }
+      );
+
+      const prescription = unwrapResponse(result);
+
+      logger.info('Got prescription', {
+        operation: 'getPrescription',
+        tenantId,
+        prescriptionId,
+        duration: Date.now() - startTime,
+      });
+
+      return prescription;
+    } catch (error) {
+      logger.error('Failed to get prescription', {
+        operation: 'getPrescription',
+        error,
+        duration: Date.now() - startTime,
+      });
+      this.handleNetworkError(error);
+    }
+  }
+
+  async updatePrescription(
+    tenantId: number,
+    prescriptionId: number,
+    data: UpdatePrescriptionData
+  ): Promise<PrescriptionResponse> {
+    const startTime = Date.now();
+
+    try {
+      const headers = await this.getAuthHeaders();
+
+      const result = await this.requestManager.fetch<PrescriptionResponse | { data: PrescriptionResponse }>(
+        `${this.config.baseUrl}/api/tenants/${tenantId}/prescriptions/${prescriptionId}`,
+        {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify(data),
+          timeout: 10000,
+        }
+      );
+
+      const prescription = unwrapResponse(result);
+
+      logger.info('Prescription updated', {
+        operation: 'updatePrescription',
+        tenantId,
+        prescriptionId,
+        duration: Date.now() - startTime,
+      });
+
+      return prescription;
+    } catch (error) {
+      logger.error('Failed to update prescription', {
+        operation: 'updatePrescription',
+        error,
+        duration: Date.now() - startTime,
+      });
+      this.handleNetworkError(error);
+    }
+  }
+
+  async deletePrescription(tenantId: number, prescriptionId: number): Promise<void> {
+    const startTime = Date.now();
+
+    try {
+      const headers = await this.getAuthHeaders();
+
+      await this.requestManager.fetch<void>(
+        `${this.config.baseUrl}/api/tenants/${tenantId}/prescriptions/${prescriptionId}`,
+        {
+          method: 'DELETE',
+          headers,
+          timeout: 10000,
+          dedupe: true,
+        }
+      );
+
+      logger.info('Prescription deleted', {
+        operation: 'deletePrescription',
+        tenantId,
+        prescriptionId,
+        duration: Date.now() - startTime,
+      });
+    } catch (error) {
+      logger.error('Failed to delete prescription', {
+        operation: 'deletePrescription',
+        error,
+        duration: Date.now() - startTime,
+      });
+      this.handleNetworkError(error);
+    }
+  }
+
   // ==================== TEST REQUEST METHODS ====================
 
   async getTestRequests(tenantId: number, appointmentId: number): Promise<{ data: TestRequestResponse[] }> {
@@ -1399,6 +1844,113 @@ export class ApiClient implements IApiClient {
     } catch (error) {
       logger.error('Failed to create test request', {
         operation: 'createTestRequest',
+        error,
+        duration: Date.now() - startTime,
+      });
+      this.handleNetworkError(error);
+    }
+  }
+
+  async getTestRequest(tenantId: number, testRequestId: number): Promise<TestRequestResponse> {
+    const startTime = Date.now();
+
+    try {
+      const headers = await this.getAuthHeaders();
+
+      const result = await this.requestManager.fetch<TestRequestResponse | { data: TestRequestResponse }>(
+        `${this.config.baseUrl}/api/tenants/${tenantId}/test-requests/${testRequestId}`,
+        {
+          method: 'GET',
+          headers,
+          timeout: 10000,
+        }
+      );
+
+      const testRequest = unwrapResponse(result);
+
+      logger.info('Got test request', {
+        operation: 'getTestRequest',
+        tenantId,
+        testRequestId,
+        duration: Date.now() - startTime,
+      });
+
+      return testRequest;
+    } catch (error) {
+      logger.error('Failed to get test request', {
+        operation: 'getTestRequest',
+        error,
+        duration: Date.now() - startTime,
+      });
+      this.handleNetworkError(error);
+    }
+  }
+
+  async updateTestRequest(
+    tenantId: number,
+    testRequestId: number,
+    data: UpdateTestRequestData
+  ): Promise<TestRequestResponse> {
+    const startTime = Date.now();
+
+    try {
+      const headers = await this.getAuthHeaders();
+
+      const result = await this.requestManager.fetch<TestRequestResponse | { data: TestRequestResponse }>(
+        `${this.config.baseUrl}/api/tenants/${tenantId}/test-requests/${testRequestId}`,
+        {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify(data),
+          timeout: 10000,
+        }
+      );
+
+      const testRequest = unwrapResponse(result);
+
+      logger.info('Test request updated', {
+        operation: 'updateTestRequest',
+        tenantId,
+        testRequestId,
+        duration: Date.now() - startTime,
+      });
+
+      return testRequest;
+    } catch (error) {
+      logger.error('Failed to update test request', {
+        operation: 'updateTestRequest',
+        error,
+        duration: Date.now() - startTime,
+      });
+      this.handleNetworkError(error);
+    }
+  }
+
+  async deleteTestRequest(tenantId: number, testRequestId: number): Promise<void> {
+    const startTime = Date.now();
+
+    try {
+      const headers = await this.getAuthHeaders();
+
+      await this.requestManager.fetch<void>(
+        `${this.config.baseUrl}/api/tenants/${tenantId}/test-requests/${testRequestId}`,
+        {
+          method: 'DELETE',
+          headers,
+          timeout: 10000,
+          dedupe: true,
+        }
+      );
+
+      logger.info('Test request deleted', {
+        operation: 'deleteTestRequest',
+        tenantId,
+        testRequestId,
+        duration: Date.now() - startTime,
+      });
+    } catch (error) {
+      logger.error('Failed to delete test request', {
+        operation: 'deleteTestRequest',
         error,
         duration: Date.now() - startTime,
       });
@@ -1513,6 +2065,27 @@ export class ApiClient implements IApiClient {
       });
       this.handleNetworkError(error);
     }
+  }
+
+  streamMessages(tenantId: number): EventSource | null {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    const url = new URL(
+      `${this.config.baseUrl}/api/tenants/${tenantId}/chat/stream`
+    );
+
+    // Note: Authorization headers are not supported by EventSource.
+    // This assumes the backend stream can be authenticated via other means (e.g. query token or cookie).
+    const eventSource = new EventSource(url.toString());
+
+    logger.info('Chat stream opened', {
+      operation: 'streamMessages',
+      tenantId,
+    });
+
+    return eventSource;
   }
 
   // ==================== USER MANAGEMENT METHODS ====================
@@ -1753,6 +2326,249 @@ export class ApiClient implements IApiClient {
     } catch (error) {
       logger.error('Failed to get tenant schedules', {
         operation: 'getTenantSchedules',
+        error,
+        duration: Date.now() - startTime,
+      });
+      this.handleNetworkError(error);
+    }
+  }
+
+  // ==================== USER SCHEDULE METHODS ====================
+
+  async upsertUserSchedules(
+    schedules: UserScheduleData[]
+  ): Promise<{ data: UserScheduleResponse[] }> {
+    const startTime = Date.now();
+
+    try {
+      const headers = await this.getAuthHeaders();
+
+      const result = await this.requestManager.fetch<{ data: UserScheduleResponse[] }>(
+        `${this.config.baseUrl}/api/user-schedules`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ schedules }),
+          timeout: 10000,
+          dedupe: true,
+        }
+      );
+
+      logger.info('User schedules upserted', {
+        operation: 'upsertUserSchedules',
+        count: result.data?.length,
+        duration: Date.now() - startTime,
+      });
+
+      return result;
+    } catch (error) {
+      logger.error('Failed to upsert user schedules', {
+        operation: 'upsertUserSchedules',
+        error,
+        duration: Date.now() - startTime,
+      });
+      this.handleNetworkError(error);
+    }
+  }
+
+  async getUserSchedules(): Promise<{ data: UserScheduleResponse[] }> {
+    const startTime = Date.now();
+
+    try {
+      const headers = await this.getAuthHeaders();
+
+      const result = await this.requestManager.fetch<{ data: UserScheduleResponse[] }>(
+        `${this.config.baseUrl}/api/user-schedules`,
+        {
+          method: 'GET',
+          headers,
+          timeout: 10000,
+        }
+      );
+
+      logger.info('Got user schedules', {
+        operation: 'getUserSchedules',
+        count: result.data?.length,
+        duration: Date.now() - startTime,
+      });
+
+      return result;
+    } catch (error) {
+      logger.error('Failed to get user schedules', {
+        operation: 'getUserSchedules',
+        error,
+        duration: Date.now() - startTime,
+      });
+      this.handleNetworkError(error);
+    }
+  }
+
+  // ==================== TIME OFF METHODS ====================
+
+  async createTimeOff(data: TimeOffData): Promise<TimeOffResponse> {
+    const startTime = Date.now();
+
+    try {
+      const headers = await this.getAuthHeaders();
+
+      const result = await this.requestManager.fetch<TimeOffResponse | { data: TimeOffResponse }>(
+        `${this.config.baseUrl}/api/time-offs`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(data),
+          timeout: 10000,
+          dedupe: true,
+        }
+      );
+
+      const timeOff = unwrapResponse(result);
+
+      logger.info('Time off created', {
+        operation: 'createTimeOff',
+        timeOffId: timeOff.id,
+        duration: Date.now() - startTime,
+      });
+
+      return timeOff;
+    } catch (error) {
+      logger.error('Failed to create time off', {
+        operation: 'createTimeOff',
+        error,
+        duration: Date.now() - startTime,
+      });
+      this.handleNetworkError(error);
+    }
+  }
+
+  async listTimeOffs(): Promise<{ data: TimeOffResponse[] }> {
+    const startTime = Date.now();
+
+    try {
+      const headers = await this.getAuthHeaders();
+
+      const result = await this.requestManager.fetch<{ data: TimeOffResponse[] }>(
+        `${this.config.baseUrl}/api/time-offs`,
+        {
+          method: 'GET',
+          headers,
+          timeout: 10000,
+        }
+      );
+
+      logger.info('Got time offs', {
+        operation: 'listTimeOffs',
+        count: result.data?.length,
+        duration: Date.now() - startTime,
+      });
+
+      return result;
+    } catch (error) {
+      logger.error('Failed to list time offs', {
+        operation: 'listTimeOffs',
+        error,
+        duration: Date.now() - startTime,
+      });
+      this.handleNetworkError(error);
+    }
+  }
+
+  async getTimeOff(timeOffId: number): Promise<TimeOffResponse> {
+    const startTime = Date.now();
+
+    try {
+      const headers = await this.getAuthHeaders();
+
+      const result = await this.requestManager.fetch<TimeOffResponse | { data: TimeOffResponse }>(
+        `${this.config.baseUrl}/api/time-offs/${timeOffId}`,
+        {
+          method: 'GET',
+          headers,
+          timeout: 10000,
+        }
+      );
+
+      const timeOff = unwrapResponse(result);
+
+      logger.info('Got time off', {
+        operation: 'getTimeOff',
+        timeOffId,
+        duration: Date.now() - startTime,
+      });
+
+      return timeOff;
+    } catch (error) {
+      logger.error('Failed to get time off', {
+        operation: 'getTimeOff',
+        error,
+        duration: Date.now() - startTime,
+      });
+      this.handleNetworkError(error);
+    }
+  }
+
+  async updateTimeOff(
+    timeOffId: number,
+    data: Partial<TimeOffData>
+  ): Promise<TimeOffResponse> {
+    const startTime = Date.now();
+
+    try {
+      const headers = await this.getAuthHeaders();
+
+      const result = await this.requestManager.fetch<TimeOffResponse | { data: TimeOffResponse }>(
+        `${this.config.baseUrl}/api/time-offs/${timeOffId}`,
+        {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify(data),
+          timeout: 10000,
+        }
+      );
+
+      const timeOff = unwrapResponse(result);
+
+      logger.info('Time off updated', {
+        operation: 'updateTimeOff',
+        timeOffId,
+        duration: Date.now() - startTime,
+      });
+
+      return timeOff;
+    } catch (error) {
+      logger.error('Failed to update time off', {
+        operation: 'updateTimeOff',
+        error,
+        duration: Date.now() - startTime,
+      });
+      this.handleNetworkError(error);
+    }
+  }
+
+  async deleteTimeOff(timeOffId: number): Promise<void> {
+    const startTime = Date.now();
+
+    try {
+      const headers = await this.getAuthHeaders();
+
+      await this.requestManager.fetch<void>(
+        `${this.config.baseUrl}/api/time-offs/${timeOffId}`,
+        {
+          method: 'DELETE',
+          headers,
+          timeout: 10000,
+          dedupe: true,
+        }
+      );
+
+      logger.info('Time off deleted', {
+        operation: 'deleteTimeOff',
+        timeOffId,
+        duration: Date.now() - startTime,
+      });
+    } catch (error) {
+      logger.error('Failed to delete time off', {
+        operation: 'deleteTimeOff',
         error,
         duration: Date.now() - startTime,
       });
